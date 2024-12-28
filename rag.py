@@ -208,27 +208,33 @@ if st.session_state.current_step >= 4:
         st.success("✅ Knowledge base configured")
 
 # Step 5: Document Upload
+# Replace the existing Document Upload section with this:
 if st.session_state.current_step >= 5:
     st.header("5. Document Upload")
-    uploaded_file = st.file_uploader("Choose a file", type=['txt', 'csv', 'pdf'])
+    uploaded_files = st.file_uploader("Choose files", type=['txt', 'csv', 'pdf'], accept_multiple_files=True)
     
-    if uploaded_file:
-        if st.button("Upload Document"):
-            try:
-                files = {"file": uploaded_file}
-                response = make_request_with_retry(
-                    requests.post,
-                    f"{st.session_state.server_url}/knowledge-bases/{st.session_state['kb_id']}/documents",
-                    files=files
-                )
-                if response.status_code == 200:
-                    st.success("Document uploaded successfully!")
-                    if st.session_state.current_step == 5:
-                        st.session_state.current_step = 6
-                else:
-                    st.error(f"Upload failed: {response.text}")
-            except Exception as e:
-                st.error(f"Error: {str(e)}")
+    if uploaded_files:
+        if st.button("Upload Documents"):
+            with st.status("Uploading documents...", expanded=True) as status:
+                for idx, uploaded_file in enumerate(uploaded_files, 1):
+                    try:
+                        st.write(f"Uploading {uploaded_file.name}...")
+                        files = {"file": uploaded_file}
+                        response = make_request_with_retry(
+                            requests.post,
+                            f"{st.session_state.server_url}/knowledge-bases/{st.session_state['kb_id']}/documents",
+                            files=files
+                        )
+                        if response.status_code == 200:
+                            st.success(f"✅ {uploaded_file.name} uploaded successfully!")
+                        else:
+                            st.error(f"❌ Failed to upload {uploaded_file.name}: {response.text}")
+                    except Exception as e:
+                        st.error(f"❌ Error uploading {uploaded_file.name}: {str(e)}")
+                
+                status.update(label="Upload complete!", state="complete")
+                if st.session_state.current_step == 5:
+                    st.session_state.current_step = 6
 
 # Step 6: Chat Interface
 if st.session_state.current_step >= 6:
