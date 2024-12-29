@@ -6,16 +6,20 @@ from requests.exceptions import RequestException
 # Configuration
 MAX_RETRIES = 5
 RETRY_DELAY = 2
+ALLOWED_FILE_TYPES = ["txt", "csv", "pdf"]
 
 def make_request_with_retry(method, url, **kwargs):
     for attempt in range(MAX_RETRIES):
         try:
             response = method(url, **kwargs)
-            if response.status_code != 502:
-                return response
-            if attempt < MAX_RETRIES - 1:
+            response.raise_for_status()  # Raise exception for non-200 status codes
+            return response
+        except requests.exceptions.HTTPError as e:
+            if response.status_code == 502 and attempt < MAX_RETRIES - 1:
                 with st.spinner(f'Retrying... (Attempt {attempt + 1}/{MAX_RETRIES})'):
                     time.sleep(RETRY_DELAY)
+            else:
+                raise e
         except RequestException as e:
             if attempt < MAX_RETRIES - 1:
                 with st.spinner(f'Connection error. Retrying... (Attempt {attempt + 1}/{MAX_RETRIES})'):
@@ -24,12 +28,52 @@ def make_request_with_retry(method, url, **kwargs):
                 raise e
     return response
 
+def validate_url(url):
+    """Validate the server URL format"""
+    if not url:
+        return False
+    if not url.startswith(('http://', 'https://')):
+        return False
+    return True
+
+def check_server_health(url):
+    """Check if the server is accessible"""
+    try:
+        response = requests.get(f"{url}/docs")
+        return response.status_code == 200
+    except:
+        return False
+
 # Page configuration
 st.set_page_config(
     page_title="RAG System",
     page_icon="🤖",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
+
+# Add CSS for better UI
+st.markdown("""
+    <style>
+    .stButton>button {
+        width: 100%;
+    }
+    .success-message {
+        padding: 1rem;
+        border-radius: 0.5rem;
+        background-color: #d4edda;
+        border: 1px solid #c3e6cb;
+        color: #155724;
+    }
+    .error-message {
+        padding: 1rem;
+        border-radius: 0.5rem;
+        background-color: #f8d7da;
+        border: 1px solid #f5c6cb;
+        color: #721c24;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
 # Initialize session states
 if 'server_url' not in st.session_state:
@@ -42,22 +86,46 @@ if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
 if 'current_step' not in st.session_state:
     st.session_state.current_step = 1
+if 'kb_id' not in st.session_state:
+    st.session_state.kb_id = None
+
+# Sidebar for configuration status
+with st.sidebar:
+    st.header("Configuration Status")
+    steps = {
+        "Server Setup": bool(st.session_state.server_url),
+        "User Setup": bool(st.session_state.user_id),
+        "Chatbot Setup": bool(st.session_state.chatbot_id),
+        "Knowledge Base": bool(st.session_state.kb_id),
+    }
+    for step, completed in steps.items():
+        if completed:
+            st.success(f"✅ {step}")
+        else:
+            st.warning(f"⏳ {step}")
 
 st.title("RAG System")
 
 # Step 1: Server Configuration
 st.header("1. Server Setup")
 if st.session_state.current_step >= 1:
-    input_url = st.text_input("Server URL:", value=st.session_state.server_url, 
-                             help="Example: http://localhost:8000")
+    input_url = st.text_input(
+        "Server URL:", 
+        value=st.session_state.server_url,
+        help="Example: http://localhost:8000"
+    )
     
     if input_url != st.session_state.server_url:
-        st.session_state.server_url = input_url
-
-    if st.session_state.server_url:
-        st.success("✅ Server URL configured")
-        if st.session_state.current_step == 1:
-            st.session_state.current_step = 2
+        if validate_url(input_url):
+            if check_server_health(input_url):
+                st.session_state.server_url = input_url
+                st.success("✅ Server connected successfully")
+                if st.session_state.current_step == 1:
+                    st.session_state.current_step = 2
+            else:
+                st.error("❌ Unable to connect to server")
+        else:
+            st.error("❌ Invalid URL format")
 
 # Step 2: User Setup
 if st.session_state.current_step >= 2:
@@ -67,33 +135,29 @@ if st.session_state.current_step >= 2:
     with col1:
         st.subheader("Create New User")
         new_user_name = st.text_input("Enter username")
-        if st.button("Create User"):
+        create_user = st.button("Create User", disabled=not new_user_name)
+        
+        if create_user:
             try:
                 response = make_request_with_retry(
                     requests.post,
                     f"{st.session_state.server_url}/users",
                     data={"name": new_user_name}
                 )
-                if response.status_code == 200:
-                    st.success(f"User created! ID: {response.json()['id']}")
-                    st.session_state.user_id = response.json()['id']
-                    if st.session_state.current_step == 2:
-                        st.session_state.current_step = 3
-                else:
-                    st.error(f"Failed to create user: {response.text}")
+                st.session_state.user_id = response.json()['id']
+                st.success(f"User created! ID: {st.session_state.user_id}")
+                if st.session_state.current_step == 2:
+                    st.session_state.current_step = 3
             except Exception as e:
-                st.error(f"Error: {str(e)}")
+                st.error(f"Error creating user: {str(e)}")
 
     with col2:
         st.subheader("Existing User")
         user_id = st.text_input("Enter User ID", value=st.session_state.user_id or "")
-        if user_id:
+        if user_id and user_id != st.session_state.user_id:
             st.session_state.user_id = user_id
             if st.session_state.current_step == 2:
                 st.session_state.current_step = 3
-
-    if st.session_state.user_id:
-        st.success("✅ User configured")
 
 # Step 3: Chatbot Setup
 if st.session_state.current_step >= 3:
@@ -104,7 +168,9 @@ if st.session_state.current_step >= 3:
         st.subheader("Create New Chatbot")
         new_bot_name = st.text_input("Chatbot Name")
         new_bot_desc = st.text_area("Description")
-        if st.button("Create Chatbot"):
+        create_bot = st.button("Create Chatbot", disabled=not new_bot_name)
+        
+        if create_bot:
             try:
                 response = make_request_with_retry(
                     requests.post,
@@ -115,67 +181,58 @@ if st.session_state.current_step >= 3:
                         "description": new_bot_desc
                     }
                 )
-                if response.status_code == 200:
-                    st.success(f"Chatbot created! ID: {response.json()['id']}")
-                    st.session_state.chatbot_id = response.json()['id']
-                    if st.session_state.current_step == 3:
-                        st.session_state.current_step = 4
-                else:
-                    st.error(f"Failed to create chatbot: {response.text}")
+                st.session_state.chatbot_id = response.json()['id']
+                st.success(f"Chatbot created! ID: {st.session_state.chatbot_id}")
+                if st.session_state.current_step == 3:
+                    st.session_state.current_step = 4
             except Exception as e:
-                st.error(f"Error: {str(e)}")
+                st.error(f"Error creating chatbot: {str(e)}")
 
     with col4:
         st.subheader("Existing Chatbot")
         chatbot_id = st.text_input("Enter Chatbot ID", value=st.session_state.chatbot_id or "")
-        if chatbot_id:
+        if chatbot_id and chatbot_id != st.session_state.chatbot_id:
             st.session_state.chatbot_id = chatbot_id
             if st.session_state.current_step == 3:
                 st.session_state.current_step = 4
-
-    if st.session_state.chatbot_id:
-        st.success("✅ Chatbot configured")
 
 # Step 4: Knowledge Base and Configuration
 if st.session_state.current_step >= 4:
     st.header("4. Knowledge Base Setup")
     
-    # Chatbot Configuration
-    st.subheader("Chatbot Settings")
-    col5, col6, col7 = st.columns(3)
-    with col5:
-        temperature = st.slider("Temperature", 0.0, 1.0, 0.5)
-    with col6:
-        max_tokens = st.slider("Max Tokens", 100, 4000, 2000)
-    with col7:
-        k = st.slider("Top k Results", 1, 20, 10)
+    with st.expander("Chatbot Settings", expanded=True):
+        col5, col6, col7 = st.columns(3)
+        with col5:
+            temperature = st.slider("Temperature", 0.0, 1.0, 0.5, 0.1)
+        with col6:
+            max_tokens = st.slider("Max Tokens", 100, 4000, 2000, 100)
+        with col7:
+            k = st.slider("Top k Results", 1, 20, 10)
 
-    if st.button("Update Settings"):
-        try:
-            response = make_request_with_retry(
-                requests.post,
-                f"{st.session_state.server_url}/chatbots/{st.session_state.chatbot_id}/configure",
-                data={
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                    "k": k
-                }
-            )
-            if response.status_code == 200:
-                st.success("Settings updated!")
-            else:
-                st.error(f"Update failed: {response.text}")
-        except Exception as e:
-            st.error(f"Error: {str(e)}")
+        if st.button("Update Settings"):
+            try:
+                response = make_request_with_retry(
+                    requests.post,
+                    f"{st.session_state.server_url}/chatbots/{st.session_state.chatbot_id}/configure",
+                    data={
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                        "k": k
+                    }
+                )
+                st.success("Settings updated successfully!")
+            except Exception as e:
+                st.error(f"Error updating settings: {str(e)}")
 
-    # Knowledge Base Creation
-    st.subheader("Create Knowledge Base")
+    st.subheader("Knowledge Base")
     col8, col9 = st.columns(2)
 
     with col8:
         kb_name = st.text_input("Knowledge Base Name")
         kb_desc = st.text_area("Knowledge Base Description")
-        if st.button("Create Knowledge Base"):
+        create_kb = st.button("Create Knowledge Base", disabled=not kb_name)
+        
+        if create_kb:
             try:
                 response = make_request_with_retry(
                     requests.post,
@@ -186,120 +243,187 @@ if st.session_state.current_step >= 4:
                         "description": kb_desc
                     }
                 )
-                if response.status_code == 200:
-                    st.success(f"Knowledge base created! ID: {response.json()['id']}")
-                    st.session_state['kb_id'] = response.json()['id']
-                    if st.session_state.current_step == 4:
-                        st.session_state.current_step = 5
-                else:
-                    st.error(f"Creation failed: {response.text}")
+                st.session_state.kb_id = response.json()['id']
+                st.success(f"Knowledge base created! ID: {st.session_state.kb_id}")
+                if st.session_state.current_step == 4:
+                    st.session_state.current_step = 5
             except Exception as e:
-                st.error(f"Error: {str(e)}")
+                st.error(f"Error creating knowledge base: {str(e)}")
 
     with col9:
         kb_id = st.text_input("Or enter existing Knowledge Base ID", 
-                             value=st.session_state.get('kb_id', ''))
-        if kb_id:
-            st.session_state['kb_id'] = kb_id
+                             value=st.session_state.kb_id or '')
+        if kb_id and kb_id != st.session_state.kb_id:
+            st.session_state.kb_id = kb_id
             if st.session_state.current_step == 4:
                 st.session_state.current_step = 5
 
-    if st.session_state.get('kb_id'):
-        st.success("✅ Knowledge base configured")
-
 # Step 5: Document Upload
-# Replace the existing Document Upload section with this:
 if st.session_state.current_step >= 5:
     st.header("5. Document Upload")
-    uploaded_files = st.file_uploader("Choose files", type=['txt', 'csv', 'pdf'], accept_multiple_files=True)
+    
+    uploaded_files = st.file_uploader(
+        "Choose files",
+        type=ALLOWED_FILE_TYPES,
+        accept_multiple_files=True,
+        help=f"Supported formats: {', '.join(ALLOWED_FILE_TYPES)}"
+    )
     
     if uploaded_files:
+        total_size = sum(file.size for file in uploaded_files)
+        if total_size > 100 * 1024 * 1024:  # 100MB limit
+            st.warning("⚠️ Total file size exceeds 100MB. Some files may fail to upload.")
+
         if st.button("Upload Documents"):
-            with st.status("Uploading documents...", expanded=True) as status:
-                for idx, uploaded_file in enumerate(uploaded_files, 1):
+            with st.status("Processing documents...", expanded=True) as status:
+                success_count = 0
+                fail_count = 0
+                
+                for idx, file in enumerate(uploaded_files, 1):
+                    progress_text = f"Processing file {idx}/{len(uploaded_files)}: {file.name}"
+                    st.write(progress_text)
+                    
                     try:
-                        st.write(f"Uploading {uploaded_file.name}...")
-                        files = {"file": uploaded_file}
+                        # Create files dictionary with single file
+                        files = [("files", (file.name, file.getvalue(), file.type))]
+                        
                         response = make_request_with_retry(
                             requests.post,
-                            f"{st.session_state.server_url}/knowledge-bases/{st.session_state['kb_id']}/documents",
+                            f"{st.session_state.server_url}/knowledge-bases/{st.session_state.kb_id}/documents",
                             files=files
                         )
-                        if response.status_code == 200:
-                            st.success(f"✅ {uploaded_file.name} uploaded successfully!")
-                        else:
-                            st.error(f"❌ Failed to upload {uploaded_file.name}: {response.text}")
+                        
+                        success_count += 1
+                        st.success(f"✅ {file.name} processed successfully")
                     except Exception as e:
-                        st.error(f"❌ Error uploading {uploaded_file.name}: {str(e)}")
+                        fail_count += 1
+                        st.error(f"❌ Error processing {file.name}: {str(e)}")
                 
-                status.update(label="Upload complete!", state="complete")
-                if st.session_state.current_step == 5:
+                status.update(
+                    label=f"Upload complete! Success: {success_count}, Failed: {fail_count}",
+                    state="complete" if fail_count == 0 else "error"
+                )
+                
+                if fail_count == 0 and st.session_state.current_step == 5:
                     st.session_state.current_step = 6
 
 # Step 6: Chat Interface
 if st.session_state.current_step >= 6:
     st.header("6. Chat Interface")
-
-    # Display chat history
-    for message in st.session_state.chat_history:
-        with st.chat_message(message["role"]):
-            st.write(message["content"])
-            if "documents" in message:
-                with st.expander("View Sources"):
-                    for doc in message["documents"]:
-                        st.markdown(f"**Document**: {doc['name']}")
-                        st.markdown(f"**Preview**: {doc['preview']}")
-                        if 'keywords' in doc and doc['keywords']:
-                            st.markdown(f"**Keywords**: {', '.join(doc['keywords'])}")
+    
+    # Add a container for chat messages with fixed height and scrolling
+    chat_container = st.container()
+    with chat_container:
+        for message in st.session_state.chat_history:
+            with st.chat_message(message["role"]):
+                st.write(message["content"])
+                if "documents" in message and message["documents"]:
+                    with st.expander("View Sources"):
+                        for doc in message["documents"]:
+                            st.markdown(f"**Document**: {doc['name']}")
+                            st.markdown(f"**Preview**: {doc['preview']}")
+                            if doc.get('keywords'):
+                                st.markdown(f"**Keywords**: {', '.join(doc['keywords'])}")
 
     # Chat input
     user_query = st.chat_input("Ask a question...")
-
+    
     if user_query:
+        # Add user message
         with st.chat_message("user"):
             st.write(user_query)
         
         st.session_state.chat_history.append({
-            "role": "user", 
+            "role": "user",
             "content": user_query
         })
         
+        # Get bot response
         with st.chat_message("assistant"):
-            with st.spinner('Processing...'):
-                try:
+            try:
+                with st.spinner('Thinking...'):
                     response = make_request_with_retry(
                         requests.post,
                         f"{st.session_state.server_url}/query",
                         data={
                             "query": user_query,
-                            "chatbot_id": st.session_state.chatbot_id,
+                            "chatbot_id": st.session_state.chatbot_id
                         }
                     )
+                    
+                    result = response.json()
+                    st.write(result['answer'])
+                    
+                    # Add bot message to history
+                    st.session_state.chat_history.append({
+                        "role": "assistant",
+                        "content": result['answer'],
+                        "documents": result.get('documents', [])
+                    })
+                    
+                    # Show sources if available
+                    if result.get('documents'):
+                        with st.expander("View Sources"):
+                            for doc in result['documents']:
+                                st.markdown(f"**Document**: {doc['name']}")
+                                st.markdown(f"**Preview**: {doc['preview']}")
+                                if doc.get('keywords'):
+                                    st.markdown(f"**Keywords**: {', '.join
+                                                                 st.markdown(f"**Keywords**: {', '.join(doc['keywords'])}")
 
-                    if response.status_code == 200:
-                        result = response.json()
-                        st.write(result['answer'])
-                        
-                        st.session_state.chat_history.append({
-                            "role": "assistant",
-                            "content": result['answer'],
-                            "documents": result.get('documents', [])
-                        })
-                        
-                        if 'documents' in result and result['documents']:
-                            with st.expander("View Sources"):
-                                for doc in result['documents']:
-                                    st.markdown(f"**Document**: {doc['name']}")
-                                    st.markdown(f"**Preview**: {doc['preview']}")
-                                    if 'keywords' in doc and doc['keywords']:
-                                        st.markdown(f"**Keywords**: {', '.join(doc['keywords'])}")
-                    else:
-                        st.error(f"Error: {response.text}")
-                except Exception as e:
-                    st.error(f"Error: {str(e)}")
+            except Exception as e:
+                st.error(f"Error getting response: {str(e)}")
 
-    # Clear chat button
-    if st.session_state.chat_history:
-        if st.button("Clear Chat History"):
+    # Add controls in a sidebar
+    with st.sidebar:
+        st.markdown("---")
+        st.subheader("Chat Controls")
+        
+        # Temperature control for real-time adjustment
+        temp = st.slider(
+            "Response Temperature",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.5,
+            step=0.1,
+            help="Higher values make the output more random, lower values make it more focused and deterministic"
+        )
+
+        # Clear chat button
+        if st.session_state.chat_history and st.button("Clear Chat History"):
             st.session_state.chat_history = []
             st.rerun()
+
+        # Session info
+        st.markdown("---")
+        st.subheader("Session Information")
+        if st.session_state.user_id:
+            st.info(f"User ID: {st.session_state.user_id}")
+        if st.session_state.chatbot_id:
+            st.info(f"Chatbot ID: {st.session_state.chatbot_id}")
+        if st.session_state.kb_id:
+            st.info(f"Knowledge Base ID: {st.session_state.kb_id}")
+
+        # Reset button
+        if st.button("Reset All Settings", type="primary"):
+            for key in st.session_state.keys():
+                del st.session_state[key]
+            st.rerun()
+
+# Add error handling for the entire app
+try:
+    if not st.session_state.server_url and st.session_state.current_step > 1:
+        st.error("Server URL not configured. Please set up the server first.")
+        st.session_state.current_step = 1
+    elif not st.session_state.user_id and st.session_state.current_step > 2:
+        st.warning("User not configured. Please set up a user first.")
+        st.session_state.current_step = 2
+    elif not st.session_state.chatbot_id and st.session_state.current_step > 3:
+        st.warning("Chatbot not configured. Please set up a chatbot first.")
+        st.session_state.current_step = 3
+    elif not st.session_state.kb_id and st.session_state.current_step > 4:
+        st.warning("Knowledge base not configured. Please set up a knowledge base first.")
+        st.session_state.current_step = 4
+except Exception as e:
+    st.error(f"An unexpected error occurred: {str(e)}")
+    st.button("Reset Application", on_click=lambda: st.session_state.clear())
