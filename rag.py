@@ -324,7 +324,7 @@ if st.session_state.current_step >= 6:
                             doc_info = {
                                 "Document": doc['name'],
                                 "Chunk Index": doc.get('chunk_index', 'N/A'),
-                                "Score": f"{doc.get('similarity_score', 0):.3f}" if doc.get('similarity_score') is not None else 'N/A'
+                                "Relevance Score": f"{doc.get('relevance_score', 0):.3f}" if doc.get('relevance_score') is not None else 'N/A'
                             }
                             doc_data.append(doc_info)
                         
@@ -347,8 +347,8 @@ if st.session_state.current_step >= 6:
                                 with metadata_cols[0]:
                                     st.metric("Chunk Index", doc.get('chunk_index', 'N/A'))
                                 with metadata_cols[1]:
-                                    st.metric("Similarity Score", 
-                                            f"{doc.get('similarity_score', 0):.3f}" if doc.get('similarity_score') is not None else 'N/A')
+                                    st.metric("Relevance Score", 
+                                            f"{doc.get('relevance_score', 0):.3f}" if doc.get('relevance_score') is not None else 'N/A')
 
     # Chat input
     user_query = st.chat_input("Ask a question...")
@@ -367,31 +367,38 @@ if st.session_state.current_step >= 6:
         with st.chat_message("assistant"):
             try:
                 with st.spinner('Thinking...'):
+                    # Prepare query data
+                    query_data = {
+                        "query": user_query,
+                        "chatbot_id": st.session_state.chatbot_id,
+                        "temperature": temp  # Using the temperature from sidebar
+                    }
+                    
                     response = make_request_with_retry(
                         requests.post,
                         f"{st.session_state.server_url}/query",
-                        data={
-                            "query": user_query,
-                            "chatbot_id": st.session_state.chatbot_id
-                        }
+                        data=query_data
                     )
                     
                     result = response.json()
-                    st.write(result['answer'])
                     
-                    # Add metadata about reranking method
-                    if 'metadata' in result:
-                        st.info(f"🔄 Reranking Method: {result['metadata'].get('rerank_type', 'similarity')}")
-                    
+                    # Display the answer
+                    if 'answer' in result:
+                        st.write(result['answer'])
+                    else:
+                        st.error("No answer received from the server")
+                        return
+
                     # Add bot message to history
-                    st.session_state.chat_history.append({
+                    chat_message = {
                         "role": "assistant",
                         "content": result['answer'],
                         "documents": result.get('documents', []),
                         "metadata": result.get('metadata', {})
-                    })
+                    }
+                    st.session_state.chat_history.append(chat_message)
                     
-                    # Show sources with enhanced display
+                    # Show sources if available
                     if result.get('documents'):
                         with st.expander("View Sources", expanded=True):
                             # Create a table for document information
@@ -400,7 +407,7 @@ if st.session_state.current_step >= 6:
                                 doc_info = {
                                     "Document": doc['name'],
                                     "Chunk Index": doc.get('chunk_index', 'N/A'),
-                                    "Score": f"{doc.get('similarity_score', 0):.3f}" if doc.get('similarity_score') is not None else 'N/A'
+                                    "Score": f"{doc.get('relevance_score', 0):.3f}" if doc.get('relevance_score') is not None else 'N/A'
                                 }
                                 doc_data.append(doc_info)
                             
@@ -423,12 +430,26 @@ if st.session_state.current_step >= 6:
                                     with metadata_cols[0]:
                                         st.metric("Chunk Index", doc.get('chunk_index', 'N/A'))
                                     with metadata_cols[1]:
-                                        st.metric("Similarity Score", 
-                                                f"{doc.get('similarity_score', 0):.3f}" if doc.get('similarity_score') is not None else 'N/A')
+                                        st.metric("Relevance Score", 
+                                                f"{doc.get('relevance_score', 0):.3f}" if doc.get('relevance_score') is not None else 'N/A')
 
+                    # Display response metadata if available
+                    if result.get('metadata'):
+                        with st.expander("Response Metadata", expanded=False):
+                            st.json(result['metadata'])
+                    
             except Exception as e:
                 st.error(f"Error getting response: {str(e)}")
-
+                # Log the full error for debugging
+                logger.error(f"Query error: {str(e)}")
+                if hasattr(e, 'response'):
+                    try:
+                        error_detail = e.response.json()
+                        logger.error(f"Server error details: {error_detail}")
+                        if 'detail' in error_detail:
+                            st.error(f"Server error: {error_detail['detail']}")
+                    except:
+                        st.error("Unable to parse server error response")
     # Add controls in a sidebar
     with st.sidebar:
         st.markdown("---")
