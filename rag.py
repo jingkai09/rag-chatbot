@@ -186,6 +186,39 @@ def main():
         initial_sidebar_state="expanded"
     )
 
+    # Set up page configuration
+    st.set_page_config(
+        page_title="RAG System",
+        page_icon="🤖",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+
+    # Add CSS for better UI
+    st.markdown("""
+        <style>
+        .stButton>button {
+            width: 100%;
+        }
+        .success-message {
+            padding: 1rem;
+            border-radius: 0.5rem;
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .error-message {
+            padding: 1rem;
+            border-radius: 0.5rem;
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
+    st.title("RAG System")
+
     # Initialize session state
     SessionState.initialize_session_state()
 
@@ -196,7 +229,14 @@ def main():
         # Render sidebar status
         UIComponents.render_sidebar_status()
 
-        # Main application logic...
+        # Step 1: Server Configuration
+        st.header("1. Server Setup")
+        if st.session_state.current_step >= 1:
+            input_url = st.text_input(
+                "Server URL:", 
+                value=st.session_state.server_url,
+                help="Example: http://localhost:8000 or your ngrok URL"
+            )
         # [Rest of the application code would go here, broken down into smaller functions]
 
     except Exception as e:
