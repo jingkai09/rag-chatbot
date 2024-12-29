@@ -362,7 +362,6 @@ if st.session_state.current_step >= 6:
                         "documents": result.get('documents', [])
                     })
                     
-# Show sources if available
                     if result.get('documents'):
                         with st.expander("View Sources"):
                             for doc in result['documents']:
@@ -375,8 +374,14 @@ if st.session_state.current_step >= 6:
                                     created_time = datetime.strptime(doc['created_at'], '%Y%m%d%H%M%S').strftime('%Y-%m-%d %H:%M:%S')
                                     st.markdown(f"**Created**: {created_time}")
                                 st.markdown(f"**Preview**: {doc['preview']}")
-                                if doc.get('keywords'):
-                                    st.markdown(f"**Keywords**: {', '.join(doc['keywords'])}")
+                                
+                                # Display keywords with scores
+                                if doc.get('keywords') and doc.get('keyword_scores'):
+                                    keywords_with_scores = [
+                                        f"{kw} ({score:.2f})"
+                                        for kw, score in zip(doc['keywords'], doc['keyword_scores'])
+                                    ]
+                                    st.markdown(f"**Keywords**: {', '.join(keywords_with_scores)}")
 
             except Exception as e:
                 st.error(f"Error getting response: {str(e)}")
