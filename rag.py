@@ -367,11 +367,6 @@ if st.session_state.current_step >= 6:
                             for doc in result['documents']:
                                 st.markdown(f"**Document**: {doc['name']}")
                                 st.markdown(f"**Preview**: {doc['preview']}")
-                                if result.get('documents'):
-                        with st.expander("View Sources"):
-                            for doc in result['documents']:
-                                st.markdown(f"**Document**: {doc['name']}")
-                                st.markdown(f"**Preview**: {doc['preview']}")
                                 if doc.get('keywords'):
                                     st.markdown(f"**Keywords**: {', '.join(doc['keywords'])}")
 
