@@ -321,10 +321,31 @@ if st.session_state.current_step >= 6:
                 if "documents" in message and message["documents"]:
                     with st.expander("View Sources"):
                         for doc in message["documents"]:
+                            st.markdown("---")
+                            st.markdown(f"**Chunk ID**: `{doc['id']}`")
                             st.markdown(f"**Document**: {doc['name']}")
+                            
+                            # Display scores in columns
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                if doc.get('similarity_score') is not None:
+                                    st.markdown(f"**Similarity Score**: {doc['similarity_score']:.3f}")
+                            with col2:
+                                if doc.get('keyword_overlap_score') is not None:
+                                    st.markdown(f"**Keyword Overlap**: {doc['keyword_overlap_score']:.3f}")
+                            
+                            if doc.get('chunk_index') is not None and doc.get('total_chunks') is not None:
+                                st.markdown(f"**Chunk**: {doc['chunk_index'] + 1} of {doc['total_chunks']}")
+                            if doc.get('created_at'):
+                                created_time = datetime.strptime(doc['created_at'], '%Y%m%d%H%M%S').strftime('%Y-%m-%d %H:%M:%S')
+                                st.markdown(f"**Created**: {created_time}")
                             st.markdown(f"**Preview**: {doc['preview']}")
+                            
+                            # Display keywords with scores
                             if doc.get('keywords'):
-                                st.markdown(f"**Keywords**: {', '.join(doc['keywords'])}")
+                                st.markdown("**Keywords**:")
+                                for kw, score in zip(doc.get('keywords', []), doc.get('keyword_scores', [])):
+                                    st.markdown(f"- {kw} ({score:.2f})")
 
     # Chat input
     user_query = st.chat_input("Ask a question...")
@@ -362,42 +383,35 @@ if st.session_state.current_step >= 6:
                         "documents": result.get('documents', [])
                     })
                     
-                    # In your chat interface section where sources are displayed:
-if result.get('documents'):
-    with st.expander("View Sources"):
-        for doc in result['documents']:
-            st.markdown("---")
-            st.markdown(f"**Chunk ID**: `{doc['id']}`")
-            st.markdown(f"**Document**: {doc['name']}")
-            if doc.get('chunk_index') is not None and doc.get('total_chunks') is not None:
-                st.markdown(f"**Chunk**: {doc['chunk_index'] + 1} of {doc['total_chunks']}")
-            if doc.get('created_at'):
-                created_time = datetime.strptime(doc['created_at'], '%Y%m%d%H%M%S').strftime('%Y-%m-%d %H:%M:%S')
-                st.markdown(f"**Created**: {created_time}")
-            st.markdown(f"**Preview**: {doc['preview']}")
-            
-            # Display keywords with their relevance scores
-            if doc.get('keywords'):
-                if doc.get('keyword_scores'):
-                    # Display keywords with scores in a more readable format
-                    keywords_with_scores = [
-                        f"**{kw}** ({score:.2f})"
-                        for kw, score in zip(doc['keywords'], doc['keyword_scores'])
-                    ]
-                    st.markdown("**Keywords**:")
-                    # Create two columns
-                    cols = st.columns(2)
-                    mid = len(keywords_with_scores) // 2
-                    # Display keywords in two columns
-                    with cols[0]:
-                        for kw in keywords_with_scores[:mid]:
-                            st.markdown(f"- {kw}")
-                    with cols[1]:
-                        for kw in keywords_with_scores[mid:]:
-                            st.markdown(f"- {kw}")
-                else:
-                    # If we only have keywords without scores
-                    st.markdown(f"**Keywords**: {', '.join(doc['keywords'])}")
+                    # Show sources if available
+                    if result.get('documents'):
+                        with st.expander("View Sources"):
+                            for doc in result['documents']:
+                                st.markdown("---")
+                                st.markdown(f"**Chunk ID**: `{doc['id']}`")
+                                st.markdown(f"**Document**: {doc['name']}")
+                                
+                                # Display scores in columns
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    if doc.get('similarity_score') is not None:
+                                        st.markdown(f"**Similarity Score**: {doc['similarity_score']:.3f}")
+                                with col2:
+                                    if doc.get('keyword_overlap_score') is not None:
+                                        st.markdown(f"**Keyword Overlap**: {doc['keyword_overlap_score']:.3f}")
+                                
+                                if doc.get('chunk_index') is not None and doc.get('total_chunks') is not None:
+                                    st.markdown(f"**Chunk**: {doc['chunk_index'] + 1} of {doc['total_chunks']}")
+                                if doc.get('created_at'):
+                                    created_time = datetime.strptime(doc['created_at'], '%Y%m%d%H%M%S').strftime('%Y-%m-%d %H:%M:%S')
+                                    st.markdown(f"**Created**: {created_time}")
+                                st.markdown(f"**Preview**: {doc['preview']}")
+                                
+                                # Display keywords with scores
+                                if doc.get('keywords'):
+                                    st.markdown("**Keywords**:")
+                                    for kw, score in zip(doc.get('keywords', []), doc.get('keyword_scores', [])):
+                                        st.markdown(f"- {kw} ({score:.2f})")
 
             except Exception as e:
                 st.error(f"Error getting response: {str(e)}")
