@@ -450,6 +450,7 @@ if st.session_state.current_step >= 6:
                             st.error(f"Server error: {error_detail['detail']}")
                     except:
                         st.error("Unable to parse server error response")
+
     # Add controls in a sidebar
     with st.sidebar:
         st.markdown("---")
