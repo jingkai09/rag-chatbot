@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import time
 from requests.exceptions import RequestException
+from datetime import datetime
 
 # Configuration
 MAX_RETRIES = 5
@@ -361,11 +362,18 @@ if st.session_state.current_step >= 6:
                         "documents": result.get('documents', [])
                     })
                     
-                    # Show sources if available
+# Show sources if available
                     if result.get('documents'):
                         with st.expander("View Sources"):
                             for doc in result['documents']:
+                                st.markdown("---")
+                                st.markdown(f"**Chunk ID**: `{doc['id']}`")
                                 st.markdown(f"**Document**: {doc['name']}")
+                                if doc.get('chunk_index') is not None and doc.get('total_chunks') is not None:
+                                    st.markdown(f"**Chunk**: {doc['chunk_index'] + 1} of {doc['total_chunks']}")
+                                if doc.get('created_at'):
+                                    created_time = datetime.strptime(doc['created_at'], '%Y%m%d%H%M%S').strftime('%Y-%m-%d %H:%M:%S')
+                                    st.markdown(f"**Created**: {created_time}")
                                 st.markdown(f"**Preview**: {doc['preview']}")
                                 if doc.get('keywords'):
                                     st.markdown(f"**Keywords**: {', '.join(doc['keywords'])}")
