@@ -6,11 +6,14 @@ from typing import Optional, Dict, List, Any
 from dataclasses import dataclass
 
 # Configuration
+from dataclasses import dataclass, field
+from typing import List
+
 @dataclass
 class Config:
     MAX_RETRIES: int = 5
     RETRY_DELAY: int = 2
-    ALLOWED_FILE_TYPES: List[str] = ["txt", "csv", "pdf"]
+    ALLOWED_FILE_TYPES: List[str] = field(default_factory=lambda: ["txt", "csv", "pdf"])
     MAX_FILE_SIZE_MB: int = 100
     DEFAULT_TEMPERATURE: float = 0.5
     DEFAULT_MAX_TOKENS: int = 2000
