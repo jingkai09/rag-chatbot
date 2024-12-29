@@ -284,6 +284,7 @@ if st.session_state.current_step >= 5:
                     st.write(progress_text)
                     
                     try:
+                        # Create files dictionary with single file
                         files = [("files", (file.name, file.getvalue(), file.type))]
                         
                         response = make_request_with_retry(
@@ -317,38 +318,12 @@ if st.session_state.current_step >= 6:
             with st.chat_message(message["role"]):
                 st.write(message["content"])
                 if "documents" in message and message["documents"]:
-                    with st.expander("View Sources", expanded=True):
-                        # Create a table for document information
-                        doc_data = []
+                    with st.expander("View Sources"):
                         for doc in message["documents"]:
-                            doc_info = {
-                                "Document": doc['name'],
-                                "Chunk Index": doc.get('chunk_index', 'N/A'),
-                                "Relevance Score": f"{doc.get('relevance_score', 0):.3f}" if doc.get('relevance_score') is not None else 'N/A'
-                            }
-                            doc_data.append(doc_info)
-                        
-                        # Display document information in a table
-                        st.table(doc_data)
-                        
-                        # Display detailed information for each document
-                        for doc in message["documents"]:
-                            with st.expander(f"Details: {doc['name']} (Chunk {doc.get('chunk_index', 'N/A')})"):
-                                st.markdown("**Preview Text:**")
-                                st.markdown(f"```\n{doc['preview']}\n```")
-                                
-                                if doc.get('keywords'):
-                                    st.markdown("**Keywords:**")
-                                    st.markdown(", ".join(doc['keywords']))
-                                
-                                # Display metadata
-                                st.markdown("**Metadata:**")
-                                metadata_cols = st.columns(2)
-                                with metadata_cols[0]:
-                                    st.metric("Chunk Index", doc.get('chunk_index', 'N/A'))
-                                with metadata_cols[1]:
-                                    st.metric("Relevance Score", 
-                                            f"{doc.get('relevance_score', 0):.3f}" if doc.get('relevance_score') is not None else 'N/A')
+                            st.markdown(f"**Document**: {doc['name']}")
+                            st.markdown(f"**Preview**: {doc['preview']}")
+                            if doc.get('keywords'):
+                                st.markdown(f"**Keywords**: {', '.join(doc['keywords'])}")
 
     # Chat input
     user_query = st.chat_input("Ask a question...")
@@ -367,89 +342,36 @@ if st.session_state.current_step >= 6:
         with st.chat_message("assistant"):
             try:
                 with st.spinner('Thinking...'):
-                    # Prepare query data
-                    query_data = {
-                        "query": user_query,
-                        "chatbot_id": st.session_state.chatbot_id,
-                        "temperature": temp  # Using the temperature from sidebar
-                    }
-                    
                     response = make_request_with_retry(
                         requests.post,
                         f"{st.session_state.server_url}/query",
-                        data=query_data
+                        data={
+                            "query": user_query,
+                            "chatbot_id": st.session_state.chatbot_id
+                        }
                     )
                     
                     result = response.json()
+                    st.write(result['answer'])
                     
-                    # Display the answer
-                    if 'answer' in result:
-                        st.write(result['answer'])
-                    else:
-                        st.error("No answer received from the server")
-                        st.stop()  # Use st.stop() instead of return
-
                     # Add bot message to history
-                    chat_message = {
+                    st.session_state.chat_history.append({
                         "role": "assistant",
                         "content": result['answer'],
-                        "documents": result.get('documents', []),
-                        "metadata": result.get('metadata', {})
-                    }
-                    st.session_state.chat_history.append(chat_message)
+                        "documents": result.get('documents', [])
+                    })
                     
                     # Show sources if available
                     if result.get('documents'):
-                        with st.expander("View Sources", expanded=True):
-                            # Create a table for document information
-                            doc_data = []
+                        with st.expander("View Sources"):
                             for doc in result['documents']:
-                                doc_info = {
-                                    "Document": doc['name'],
-                                    "Chunk Index": doc.get('chunk_index', 'N/A'),
-                                    "Score": f"{doc.get('relevance_score', 0):.3f}" if doc.get('relevance_score') is not None else 'N/A'
-                                }
-                                doc_data.append(doc_info)
-                            
-                            # Display document information in a table
-                            st.table(doc_data)
-                            
-                            # Display detailed information for each document
-                            for doc in result['documents']:
-                                with st.expander(f"Details: {doc['name']} (Chunk {doc.get('chunk_index', 'N/A')})"):
-                                    st.markdown("**Preview Text:**")
-                                    st.markdown(f"```\n{doc['preview']}\n```")
-                                    
-                                    if doc.get('keywords'):
-                                        st.markdown("**Keywords:**")
-                                        st.markdown(", ".join(doc['keywords']))
-                                    
-                                    # Display metadata
-                                    st.markdown("**Metadata:**")
-                                    metadata_cols = st.columns(2)
-                                    with metadata_cols[0]:
-                                        st.metric("Chunk Index", doc.get('chunk_index', 'N/A'))
-                                    with metadata_cols[1]:
-                                        st.metric("Relevance Score", 
-                                                f"{doc.get('relevance_score', 0):.3f}" if doc.get('relevance_score') is not None else 'N/A')
+                                st.markdown(f"**Document**: {doc['name']}")
+                                st.markdown(f"**Preview**: {doc['preview']}")
+                                if doc.get('keywords'):
+                                    st.markdown(f"**Keywords**: {', '.join(doc['keywords'])}")
 
-                    # Display response metadata if available
-                    if result.get('metadata'):
-                        with st.expander("Response Metadata", expanded=False):
-                            st.json(result['metadata'])
-                    
             except Exception as e:
                 st.error(f"Error getting response: {str(e)}")
-                # Log the full error for debugging
-                logger.error(f"Query error: {str(e)}")
-                if hasattr(e, 'response'):
-                    try:
-                        error_detail = e.response.json()
-                        logger.error(f"Server error details: {error_detail}")
-                        if 'detail' in error_detail:
-                            st.error(f"Server error: {error_detail['detail']}")
-                    except:
-                        st.error("Unable to parse server error response")
 
     # Add controls in a sidebar
     with st.sidebar:
