@@ -387,7 +387,7 @@ if st.session_state.current_step >= 6:
                         st.write(result['answer'])
                     else:
                         st.error("No answer received from the server")
-                        return
+                        st.stop()  # Use st.stop() instead of return
 
                     # Add bot message to history
                     chat_message = {
