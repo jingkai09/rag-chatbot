@@ -290,29 +290,48 @@ if st.session_state.current_step >= 5:
                     progress_text = f"Processing file {idx}/{len(uploaded_files)}: {file.name}"
                     st.write(progress_text)
                     
-                    try:
-                        # Create files dictionary with single file
-                        files = [("files", (file.name, file.getvalue(), file.type))]
-                        
-                        response = make_request_with_retry(
-                            requests.post,
-                            f"{st.session_state.server_url}/knowledge-bases/{st.session_state.kb_id}/documents",
-                            files=files
-                        )
-                        
-                        success_count += 1
-                        st.success(f"✅ {file.name} processed successfully")
-                    except Exception as e:
-                        fail_count += 1
-                        st.error(f"❌ Error processing {file.name}: {str(e)}")
+                    # Initialize retry counter for each file
+                    retry_count = 0
+                    max_retries = 5
+                    success = False
+
+                    while retry_count < max_retries and not success:
+                        try:
+                            # Create files dictionary with single file
+                            files = [("files", (file.name, file.getvalue(), file.type))]
+                            
+                            response = make_request_with_retry(
+                                requests.post,
+                                f"{st.session_state.server_url}/knowledge-bases/{st.session_state.kb_id}/documents",
+                                files=files
+                            )
+                            
+                            success = True
+                            success_count += 1
+                            st.success(f"✅ {file.name} processed successfully")
+
+                        except Exception as e:
+                            retry_count += 1
+                            if retry_count < max_retries:
+                                st.warning(f"⚠️ Attempt {retry_count}/{max_retries} failed for {file.name}. Retrying...")
+                                time.sleep(RETRY_DELAY)  # Use the same delay as make_request_with_retry
+                            else:
+                                fail_count += 1
+                                st.error(f"❌ Error processing {file.name} after {max_retries} attempts: {str(e)}")
                 
-                status.update(
-                    label=f"Upload complete! Success: {success_count}, Failed: {fail_count}",
-                    state="complete" if fail_count == 0 else "error"
-                )
-                
-                if fail_count == 0 and st.session_state.current_step == 5:
-                    st.session_state.current_step = 6
+                # Final status update
+                if fail_count == 0:
+                    status.update(
+                        label=f"Upload complete! All {success_count} files processed successfully.",
+                        state="complete"
+                    )
+                    if st.session_state.current_step == 5:
+                        st.session_state.current_step = 6
+                else:
+                    status.update(
+                        label=f"Upload finished with issues. Success: {success_count}, Failed: {fail_count}",
+                        state="error"
+                    )
                     
 # Step 6: Chat Interface
 if st.session_state.current_step >= 6:
