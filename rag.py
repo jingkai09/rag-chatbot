@@ -201,13 +201,19 @@ if st.session_state.current_step >= 4:
     st.header("4. Knowledge Base Setup")
     
     with st.expander("Chatbot Settings", expanded=True):
-        col5, col6, col7 = st.columns(3)
+        col5, col6, col7, col8 = st.columns(4)  # Changed to 4 columns
         with col5:
             temperature = st.slider("Temperature", 0.0, 1.0, 0.5, 0.1)
         with col6:
             max_tokens = st.slider("Max Tokens", 100, 4000, 2000, 100)
         with col7:
             k = st.slider("Top k Results", 1, 20, 10)
+        with col8:
+            rerank_type = st.selectbox(
+                "Rerank Method",
+                options=["similarity", "keywords"],
+                help="similarity: Uses cosine similarity for reranking\nkeywords: Uses keyword overlap for reranking"
+            )
 
         if st.button("Update Settings"):
             try:
@@ -217,7 +223,8 @@ if st.session_state.current_step >= 4:
                     data={
                         "temperature": temperature,
                         "max_tokens": max_tokens,
-                        "k": k
+                        "k": k,
+                        "rerank_type": rerank_type
                     }
                 )
                 st.success("Settings updated successfully!")
