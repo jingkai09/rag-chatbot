@@ -4,6 +4,13 @@ import time
 from requests.exceptions import RequestException
 from datetime import datetime
 
+def clear_user_form():
+    st.session_state["new_user_input"] = ""
+
+def clear_bot_form():
+    st.session_state["new_bot_input"] = ""
+    st.session_state["new_bot_desc"] = ""
+
 # Configuration
 MAX_RETRIES = 5
 RETRY_DELAY = 2
@@ -94,6 +101,8 @@ if 'existing_users' not in st.session_state:
     st.session_state.existing_users = []
 if 'existing_chatbots' not in st.session_state:
     st.session_state.existing_chatbots = []
+if 'existing_kbs' not in st.session_state:
+    st.session_state.existing_kbs = []
 
 # Sidebar for configuration status
 with st.sidebar:
@@ -140,10 +149,10 @@ if st.session_state.current_step >= 2:
 
     with col1:
         st.subheader("Create New User")
-        new_user_name = st.text_input("Enter username", key="new_user_input")
+        new_user_name = st.text_input("Enter username", key="new_user_input", on_change=clear_user_form)
+        create_user = st.button("Create User", disabled=not new_user_name)
         
-        # Auto-create user when name is entered
-        if new_user_name:
+        if create_user and new_user_name:
             try:
                 response = make_request_with_retry(
                     requests.post,
@@ -156,15 +165,11 @@ if st.session_state.current_step >= 2:
                 st.success(f"User created! ID: {new_user_id}")
                 if st.session_state.current_step == 2:
                     st.session_state.current_step = 3
-                # Clear the input
-                st.session_state.new_user_input = ""
-                st.rerun()
             except Exception as e:
                 st.error(f"Error creating user: {str(e)}")
 
     with col2:
         st.subheader("Select Existing User")
-        # Create a list of user options including names
         user_options = ["Select a user..."] + [
             f"{user['name']} ({user['id']})" 
             for user in st.session_state.existing_users
@@ -188,11 +193,11 @@ if st.session_state.current_step >= 3:
 
     with col3:
         st.subheader("Create New Chatbot")
-        new_bot_name = st.text_input("Chatbot Name", key="new_bot_input")
+        new_bot_name = st.text_input("Chatbot Name", key="new_bot_input", on_change=clear_bot_form)
         new_bot_desc = st.text_area("Description", key="new_bot_desc")
+        create_bot = st.button("Create Chatbot", disabled=not new_bot_name)
         
-        # Auto-create chatbot when name is entered
-        if new_bot_name:
+        if create_bot and new_bot_name:
             try:
                 response = make_request_with_retry(
                     requests.post,
@@ -213,16 +218,11 @@ if st.session_state.current_step >= 3:
                 st.success(f"Chatbot created! ID: {new_bot_id}")
                 if st.session_state.current_step == 3:
                     st.session_state.current_step = 4
-                # Clear the inputs
-                st.session_state.new_bot_input = ""
-                st.session_state.new_bot_desc = ""
-                st.rerun()
             except Exception as e:
                 st.error(f"Error creating chatbot: {str(e)}")
 
     with col4:
         st.subheader("Select Existing Chatbot")
-        # Create a list of chatbot options including names
         bot_options = ["Select a chatbot..."] + [
             f"{bot['name']} ({bot['id']})" 
             for bot in st.session_state.existing_chatbots
@@ -271,11 +271,12 @@ if st.session_state.current_step >= 4:
     col8, col9 = st.columns(2)
 
     with col8:
-        kb_name = st.text_input("Knowledge Base Name")
-        kb_desc = st.text_area("Knowledge Base Description")
-        create_kb = st.button("Create Knowledge Base", disabled=not kb_name)
+        st.subheader("Create New Knowledge Base")
+        kb_name = st.text_input("Knowledge Base Name", key="new_kb_input")
+        kb_desc = st.text_area("Knowledge Base Description", key="new_kb_desc")
         
-        if create_kb:
+        # Auto-create knowledge base when name is entered
+        if kb_name:
             try:
                 response = make_request_with_retry(
                     requests.post,
@@ -286,17 +287,35 @@ if st.session_state.current_step >= 4:
                         "description": kb_desc
                     }
                 )
-                st.session_state.kb_id = response.json()['id']
-                st.success(f"Knowledge base created! ID: {st.session_state.kb_id}")
+                new_kb_id = response.json()['id']
+                st.session_state.existing_kbs = st.session_state.get('existing_kbs', []) + [
+                    {"id": new_kb_id, "name": kb_name, "description": kb_desc}
+                ]
+                st.session_state.kb_id = new_kb_id
+                st.success(f"Knowledge base created! ID: {new_kb_id}")
                 if st.session_state.current_step == 4:
                     st.session_state.current_step = 5
+                # Clear the inputs using session state
+                st.session_state.new_kb_input = ""
+                st.session_state.new_kb_desc = ""
+                st.rerun()
             except Exception as e:
                 st.error(f"Error creating knowledge base: {str(e)}")
 
     with col9:
-        kb_id = st.text_input("Or enter existing Knowledge Base ID", 
-                             value=st.session_state.kb_id or '')
-        if kb_id and kb_id != st.session_state.kb_id:
+        st.subheader("Select Existing Knowledge Base")
+        kb_options = ["Select a knowledge base..."] + [
+            f"{kb['name']} ({kb['id']})" 
+            for kb in st.session_state.get('existing_kbs', [])
+        ]
+        selected_kb = st.selectbox(
+            "Choose an existing knowledge base",
+            options=kb_options,
+            key="kb_select"
+        )
+        
+        if selected_kb and selected_kb != "Select a knowledge base...":
+            kb_id = selected_kb.split("(")[-1].rstrip(")")
             st.session_state.kb_id = kb_id
             if st.session_state.current_step == 4:
                 st.session_state.current_step = 5
