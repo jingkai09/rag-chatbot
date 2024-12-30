@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import time
 from requests.exceptions import RequestException
+from datetime import datetime
 
 # Configuration
 MAX_RETRIES = 5
