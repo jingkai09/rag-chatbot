@@ -2,14 +2,6 @@ import streamlit as st
 import requests
 import time
 from requests.exceptions import RequestException
-from datetime import datetime
-
-def clear_user_form():
-    st.session_state["new_user_input"] = ""
-
-def clear_bot_form():
-    st.session_state["new_bot_input"] = ""
-    st.session_state["new_bot_desc"] = ""
 
 # Configuration
 MAX_RETRIES = 5
