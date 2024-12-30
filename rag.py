@@ -45,6 +45,68 @@ def check_server_health(url):
     except:
         return False
 
+# Function to fetch existing items
+def fetch_existing_items(item_type):
+    """Fetch existing users, chatbots, or knowledge bases"""
+    try:
+        response = make_request_with_retry(
+            requests.get,
+            f"{st.session_state.server_url}/{item_type}"
+        )
+        return response.json()
+    except Exception as e:
+        st.error(f"Error fetching {item_type}: {str(e)}")
+        return []
+
+# Add this function near your other utility functions
+def process_chat_query(query, chatbot_id):
+    """
+    Process a chat query with retry logic
+    Returns (success, result, error_message)
+    """
+    for attempt in range(CHAT_MAX_RETRIES):
+        try:
+            with st.spinner(f'Attempt {attempt + 1}/{CHAT_MAX_RETRIES}: Getting response...'):
+                response = requests.post(
+                    f"{st.session_state.server_url}/query",
+                    data={
+                        "query": query,
+                        "chatbot_id": chatbot_id
+                    }
+                )
+                
+                if response.status_code == 200:
+                    return True, response.json(), None
+                
+                # Handle specific error codes
+                if response.status_code == 502:  # Bad Gateway
+                    if attempt < CHAT_MAX_RETRIES - 1:
+                        time.sleep(CHAT_RETRY_DELAY)
+                        continue
+                    return False, None, "Server temporarily unavailable. Please try again."
+                
+                # Handle other error codes
+                error_message = f"Server error (HTTP {response.status_code})"
+                try:
+                    error_data = response.json()
+                    if 'detail' in error_data:
+                        error_message = error_data['detail']
+                except:
+                    pass
+                
+                if attempt < CHAT_MAX_RETRIES - 1:
+                    time.sleep(CHAT_RETRY_DELAY)
+                    continue
+                return False, None, error_message
+                
+        except requests.exceptions.RequestException as e:
+            if attempt < CHAT_MAX_RETRIES - 1:
+                time.sleep(CHAT_RETRY_DELAY)
+                continue
+            return False, None, f"Connection error: {str(e)}"
+    
+    return False, None, f"Failed after {CHAT_MAX_RETRIES} attempts"
+
 # Page configuration
 st.set_page_config(
     page_title="RAG System",
@@ -89,6 +151,13 @@ if 'current_step' not in st.session_state:
     st.session_state.current_step = 1
 if 'kb_id' not in st.session_state:
     st.session_state.kb_id = None
+    # Add these to your session state initializations at the start of the code
+if 'existing_users' not in st.session_state:
+    st.session_state.existing_users = []
+if 'existing_chatbots' not in st.session_state:
+    st.session_state.existing_chatbots = []
+if 'existing_kbs' not in st.session_state:
+    st.session_state.existing_kbs = []
 
 # Sidebar for configuration status
 with st.sidebar:
@@ -131,6 +200,11 @@ if st.session_state.current_step >= 1:
 # Step 2: User Setup
 if st.session_state.current_step >= 2:
     st.header("2. User Setup")
+    
+    # Fetch existing users when server URL changes or initially
+    if st.session_state.server_url:
+        st.session_state.existing_users = fetch_existing_items("users")
+    
     col1, col2 = st.columns(2)
 
     with col1:
@@ -145,7 +219,10 @@ if st.session_state.current_step >= 2:
                     f"{st.session_state.server_url}/users",
                     data={"name": new_user_name}
                 )
-                st.session_state.user_id = response.json()['id']
+                new_user = response.json()
+                st.session_state.user_id = new_user['id']
+                # Update existing users list
+                st.session_state.existing_users.append(new_user)
                 st.success(f"User created! ID: {st.session_state.user_id}")
                 if st.session_state.current_step == 2:
                     st.session_state.current_step = 3
@@ -153,89 +230,85 @@ if st.session_state.current_step >= 2:
                 st.error(f"Error creating user: {str(e)}")
 
     with col2:
-        st.subheader("Existing User")
-        user_id = st.text_input("Enter User ID", value=st.session_state.user_id or "")
-        if user_id and user_id != st.session_state.user_id:
-            st.session_state.user_id = user_id
-            if st.session_state.current_step == 2:
-                st.session_state.current_step = 3
+        st.subheader("Select Existing User")
+        # Create a list of user options with name and ID
+        user_options = [f"{user['name']} (ID: {user['id']})" for user in st.session_state.existing_users]
+        if user_options:
+            selected_user = st.selectbox(
+                "Select a user",
+                options=user_options,
+                index=None,
+                placeholder="Choose a user..."
+            )
+            if selected_user:
+                # Extract ID from the selected option
+                user_id = selected_user.split("ID: ")[-1].rstrip(")")
+                st.session_state.user_id = user_id
+                if st.session_state.current_step == 2:
+                    st.session_state.current_step = 3
 
-# Step 3: Chatbot Setup
-if st.session_state.current_step >= 3:
-    st.header("3. Chatbot Setup")
-    col3, col4 = st.columns(2)
+# Step 2: User Setup
+if st.session_state.current_step >= 2:
+    st.header("2. User Setup")
+    
+    # Fetch existing users when server URL changes or initially
+    if st.session_state.server_url:
+        st.session_state.existing_users = fetch_existing_items("users")
+    
+    col1, col2 = st.columns(2)
 
-    with col3:
-        st.subheader("Create New Chatbot")
-        new_bot_name = st.text_input("Chatbot Name")
-        new_bot_desc = st.text_area("Description")
-        create_bot = st.button("Create Chatbot", disabled=not new_bot_name)
+    with col1:
+        st.subheader("Create New User")
+        new_user_name = st.text_input("Enter username")
+        create_user = st.button("Create User", disabled=not new_user_name)
         
-        if create_bot:
+        if create_user:
             try:
                 response = make_request_with_retry(
                     requests.post,
-                    f"{st.session_state.server_url}/chatbots",
-                    data={
-                        "user_id": st.session_state.user_id,
-                        "name": new_bot_name,
-                        "description": new_bot_desc
-                    }
+                    f"{st.session_state.server_url}/users",
+                    data={"name": new_user_name}
                 )
-                st.session_state.chatbot_id = response.json()['id']
-                st.success(f"Chatbot created! ID: {st.session_state.chatbot_id}")
-                if st.session_state.current_step == 3:
-                    st.session_state.current_step = 4
+                new_user = response.json()
+                st.session_state.user_id = new_user['id']
+                # Update existing users list
+                st.session_state.existing_users.append(new_user)
+                st.success(f"User created! ID: {st.session_state.user_id}")
+                if st.session_state.current_step == 2:
+                    st.session_state.current_step = 3
             except Exception as e:
-                st.error(f"Error creating chatbot: {str(e)}")
+                st.error(f"Error creating user: {str(e)}")
 
-    with col4:
-        st.subheader("Existing Chatbot")
-        chatbot_id = st.text_input("Enter Chatbot ID", value=st.session_state.chatbot_id or "")
-        if chatbot_id and chatbot_id != st.session_state.chatbot_id:
-            st.session_state.chatbot_id = chatbot_id
-            if st.session_state.current_step == 3:
-                st.session_state.current_step = 4
+    with col2:
+        st.subheader("Select Existing User")
+        # Create a list of user options with name and ID
+        user_options = [f"{user['name']} (ID: {user['id']})" for user in st.session_state.existing_users]
+        if user_options:
+            selected_user = st.selectbox(
+                "Select a user",
+                options=user_options,
+                index=None,
+                placeholder="Choose a user..."
+            )
+            if selected_user:
+                # Extract ID from the selected option
+                user_id = selected_user.split("ID: ")[-1].rstrip(")")
+                st.session_state.user_id = user_id
+                if st.session_state.current_step == 2:
+                    st.session_state.current_step = 3
 
-# Step 4: Knowledge Base and Configuration
+# Step 4: Knowledge Base Setup
 if st.session_state.current_step >= 4:
     st.header("4. Knowledge Base Setup")
     
-    with st.expander("Chatbot Settings", expanded=True):
-        col5, col6, col7, col8 = st.columns(4)  # Changed to 4 columns
-        with col5:
-            temperature = st.slider("Temperature", 0.0, 1.0, 0.5, 0.1)
-        with col6:
-            max_tokens = st.slider("Max Tokens", 100, 4000, 2000, 100)
-        with col7:
-            k = st.slider("Top k Results", 1, 20, 10)
-        with col8:
-            rerank_type = st.selectbox(
-                "Rerank Method",
-                options=["similarity", "keywords"],
-                help="similarity: Uses cosine similarity for reranking\nkeywords: Uses keyword overlap for reranking"
-            )
-
-        if st.button("Update Settings"):
-            try:
-                response = make_request_with_retry(
-                    requests.post,
-                    f"{st.session_state.server_url}/chatbots/{st.session_state.chatbot_id}/configure",
-                    data={
-                        "temperature": temperature,
-                        "max_tokens": max_tokens,
-                        "k": k,
-                        "rerank_type": rerank_type
-                    }
-                )
-                st.success("Settings updated successfully!")
-            except Exception as e:
-                st.error(f"Error updating settings: {str(e)}")
-
-    st.subheader("Knowledge Base")
+    # Fetch existing knowledge bases for the current chatbot
+    if st.session_state.chatbot_id:
+        st.session_state.existing_kbs = fetch_existing_items(f"knowledge-bases?chatbot_id={st.session_state.chatbot_id}")
+    
     col8, col9 = st.columns(2)
 
     with col8:
+        st.subheader("Create New Knowledge Base")
         kb_name = st.text_input("Knowledge Base Name")
         kb_desc = st.text_area("Knowledge Base Description")
         create_kb = st.button("Create Knowledge Base", disabled=not kb_name)
@@ -251,7 +324,10 @@ if st.session_state.current_step >= 4:
                         "description": kb_desc
                     }
                 )
-                st.session_state.kb_id = response.json()['id']
+                new_kb = response.json()
+                st.session_state.kb_id = new_kb['id']
+                # Update existing knowledge bases list
+                st.session_state.existing_kbs.append(new_kb)
                 st.success(f"Knowledge base created! ID: {st.session_state.kb_id}")
                 if st.session_state.current_step == 4:
                     st.session_state.current_step = 5
@@ -259,12 +335,22 @@ if st.session_state.current_step >= 4:
                 st.error(f"Error creating knowledge base: {str(e)}")
 
     with col9:
-        kb_id = st.text_input("Or enter existing Knowledge Base ID", 
-                             value=st.session_state.kb_id or '')
-        if kb_id and kb_id != st.session_state.kb_id:
-            st.session_state.kb_id = kb_id
-            if st.session_state.current_step == 4:
-                st.session_state.current_step = 5
+        st.subheader("Select Existing Knowledge Base")
+        # Create a list of knowledge base options with name and ID
+        kb_options = [f"{kb['name']} (ID: {kb['id']})" for kb in st.session_state.existing_kbs]
+        if kb_options:
+            selected_kb = st.selectbox(
+                "Select a knowledge base",
+                options=kb_options,
+                index=None,
+                placeholder="Choose a knowledge base..."
+            )
+            if selected_kb:
+                # Extract ID from the selected option
+                kb_id = selected_kb.split("ID: ")[-1].rstrip(")")
+                st.session_state.kb_id = kb_id
+                if st.session_state.current_step == 4:
+                    st.session_state.current_step = 5
                 
 # Step 5: Document Upload
 if st.session_state.current_step >= 5:
@@ -374,6 +460,46 @@ if st.session_state.current_step >= 6:
                                     st.markdown(f"- {kw} ({score:.2f})")
 
     # Chat input
+if st.session_state.current_step >= 6:
+    st.header("6. Chat Interface")
+    
+    # Add chat container and display history
+    chat_container = st.container()
+    with chat_container:
+        for message in st.session_state.chat_history:
+            with st.chat_message(message["role"]):
+                st.write(message["content"])
+                if "documents" in message and message["documents"]:
+                    with st.expander("View Sources"):
+                        for doc in message["documents"]:
+                            st.markdown("---")
+                            st.markdown(f"**Chunk ID**: `{doc['id']}`")
+                            st.markdown(f"**Document**: {doc['name']}")
+                            
+                            # Display scores in columns
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                if doc.get('similarity_score') is not None:
+                                    st.markdown(f"**Similarity Score**: {doc['similarity_score']:.3f}")
+                            with col2:
+                                if doc.get('keyword_overlap_score') is not None:
+                                    st.markdown(f"**Keyword Overlap**: {doc['keyword_overlap_score']:.3f}")
+                            
+                            # Additional document information
+                            if doc.get('chunk_index') is not None and doc.get('total_chunks') is not None:
+                                st.markdown(f"**Chunk**: {doc['chunk_index'] + 1} of {doc['total_chunks']}")
+                            if doc.get('created_at'):
+                                created_time = datetime.strptime(doc['created_at'], '%Y%m%d%H%M%S').strftime('%Y-%m-%d %H:%M:%S')
+                                st.markdown(f"**Created**: {created_time}")
+                            st.markdown(f"**Preview**: {doc['preview']}")
+                            
+                            # Display keywords with scores
+                            if doc.get('keywords'):
+                                st.markdown("**Keywords**:")
+                                for kw, score in zip(doc.get('keywords', []), doc.get('keyword_scores', [])):
+                                    st.markdown(f"- {kw} ({score:.2f})")
+
+    # Chat input and processing
     user_query = st.chat_input("Ask a question...")
     
     if user_query:
@@ -386,61 +512,58 @@ if st.session_state.current_step >= 6:
             "content": user_query
         })
         
-        # Get bot response
+        # Get bot response with retry logic
         with st.chat_message("assistant"):
-            try:
-                with st.spinner('Thinking...'):
-                    response = make_request_with_retry(
-                        requests.post,
-                        f"{st.session_state.server_url}/query",
-                        data={
-                            "query": user_query,
-                            "chatbot_id": st.session_state.chatbot_id
-                        }
-                    )
-                    
-                    result = response.json()
-                    st.write(result['answer'])
-                    
-                    # Add bot message to history
-                    st.session_state.chat_history.append({
-                        "role": "assistant",
-                        "content": result['answer'],
-                        "documents": result.get('documents', [])
-                    })
-                    
-                    # Show sources if available
-                    if result.get('documents'):
-                        with st.expander("View Sources"):
-                            for doc in result['documents']:
-                                st.markdown("---")
-                                st.markdown(f"**Chunk ID**: `{doc['id']}`")
-                                st.markdown(f"**Document**: {doc['name']}")
-                                
-                                # Display scores in columns
-                                col1, col2 = st.columns(2)
-                                with col1:
-                                    if doc.get('similarity_score') is not None:
-                                        st.markdown(f"**Similarity Score**: {doc['similarity_score']:.3f}")
-                                with col2:
-                                    if doc.get('keyword_overlap_score') is not None:
-                                        st.markdown(f"**Keyword Overlap**: {doc['keyword_overlap_score']:.3f}")
-                                
-                                if doc.get('chunk_index') is not None and doc.get('total_chunks') is not None:
-                                    st.markdown(f"**Chunk**: {doc['chunk_index'] + 1} of {doc['total_chunks']}")
-                                if doc.get('created_at'):
-                                    created_time = datetime.strptime(doc['created_at'], '%Y%m%d%H%M%S').strftime('%Y-%m-%d %H:%M:%S')
-                                    st.markdown(f"**Created**: {created_time}")
-                                st.markdown(f"**Preview**: {doc['preview']}")
-                                
-                                # Display keywords with scores
-                                if doc.get('keywords'):
-                                    st.markdown("**Keywords**:")
-                                    for kw, score in zip(doc.get('keywords', []), doc.get('keyword_scores', [])):
-                                        st.markdown(f"- {kw} ({score:.2f})")
-
-            except Exception as e:
-                st.error(f"Error getting response: {str(e)}")
+            success, result, error_message = process_chat_query(user_query, st.session_state.chatbot_id)
+            
+            if success:
+                st.write(result['answer'])
+                
+                # Add bot message to history
+                st.session_state.chat_history.append({
+                    "role": "assistant",
+                    "content": result['answer'],
+                    "documents": result.get('documents', [])
+                })
+                
+                # Show sources if available
+                if result.get('documents'):
+                    with st.expander("View Sources"):
+                        for doc in result['documents']:
+                            st.markdown("---")
+                            st.markdown(f"**Chunk ID**: `{doc['id']}`")
+                            st.markdown(f"**Document**: {doc['name']}")
+                            
+                            # Display scores in columns
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                if doc.get('similarity_score') is not None:
+                                    st.markdown(f"**Similarity Score**: {doc['similarity_score']:.3f}")
+                            with col2:
+                                if doc.get('keyword_overlap_score') is not None:
+                                    st.markdown(f"**Keyword Overlap**: {doc['keyword_overlap_score']:.3f}")
+                            
+                            # Additional document information
+                            if doc.get('chunk_index') is not None and doc.get('total_chunks') is not None:
+                                st.markdown(f"**Chunk**: {doc['chunk_index'] + 1} of {doc['total_chunks']}")
+                            if doc.get('created_at'):
+                                created_time = datetime.strptime(doc['created_at'], '%Y%m%d%H%M%S').strftime('%Y-%m-%d %H:%M:%S')
+                                st.markdown(f"**Created**: {created_time}")
+                            st.markdown(f"**Preview**: {doc['preview']}")
+                            
+                            # Display keywords with scores
+                            if doc.get('keywords'):
+                                st.markdown("**Keywords**:")
+                                for kw, score in zip(doc.get('keywords', []), doc.get('keyword_scores', [])):
+                                    st.markdown(f"- {kw} ({score:.2f})")
+            else:
+                st.error(f"Failed to get response: {error_message}")
+                # Add error message to chat history
+                st.session_state.chat_history.append({
+                    "role": "assistant",
+                    "content": f"Error: {error_message}",
+                    "error": True
+                })
 
     # Add controls in a sidebar
     with st.sidebar:
