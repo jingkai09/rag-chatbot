@@ -307,7 +307,7 @@ if st.session_state.current_step >= 5:
                 
                 if fail_count == 0 and st.session_state.current_step == 5:
                     st.session_state.current_step = 6
-
+                    
 # Step 6: Chat Interface
 if st.session_state.current_step >= 6:
     st.header("6. Chat Interface")
