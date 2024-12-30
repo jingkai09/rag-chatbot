@@ -89,6 +89,11 @@ if 'current_step' not in st.session_state:
     st.session_state.current_step = 1
 if 'kb_id' not in st.session_state:
     st.session_state.kb_id = None
+# Add these new ones while keeping all the above
+if 'existing_users' not in st.session_state:
+    st.session_state.existing_users = []
+if 'existing_chatbots' not in st.session_state:
+    st.session_state.existing_chatbots = []
 
 # Sidebar for configuration status
 with st.sidebar:
@@ -135,27 +140,43 @@ if st.session_state.current_step >= 2:
 
     with col1:
         st.subheader("Create New User")
-        new_user_name = st.text_input("Enter username")
-        create_user = st.button("Create User", disabled=not new_user_name)
+        new_user_name = st.text_input("Enter username", key="new_user_input")
         
-        if create_user:
+        # Auto-create user when name is entered
+        if new_user_name:
             try:
                 response = make_request_with_retry(
                     requests.post,
                     f"{st.session_state.server_url}/users",
                     data={"name": new_user_name}
                 )
-                st.session_state.user_id = response.json()['id']
-                st.success(f"User created! ID: {st.session_state.user_id}")
+                new_user_id = response.json()['id']
+                st.session_state.existing_users.append({"id": new_user_id, "name": new_user_name})
+                st.session_state.user_id = new_user_id
+                st.success(f"User created! ID: {new_user_id}")
                 if st.session_state.current_step == 2:
                     st.session_state.current_step = 3
+                # Clear the input
+                st.session_state.new_user_input = ""
+                st.rerun()
             except Exception as e:
                 st.error(f"Error creating user: {str(e)}")
 
     with col2:
-        st.subheader("Existing User")
-        user_id = st.text_input("Enter User ID", value=st.session_state.user_id or "")
-        if user_id and user_id != st.session_state.user_id:
+        st.subheader("Select Existing User")
+        # Create a list of user options including names
+        user_options = ["Select a user..."] + [
+            f"{user['name']} ({user['id']})" 
+            for user in st.session_state.existing_users
+        ]
+        selected_user = st.selectbox(
+            "Choose an existing user",
+            options=user_options,
+            key="user_select"
+        )
+        
+        if selected_user and selected_user != "Select a user...":
+            user_id = selected_user.split("(")[-1].rstrip(")")
             st.session_state.user_id = user_id
             if st.session_state.current_step == 2:
                 st.session_state.current_step = 3
@@ -167,11 +188,11 @@ if st.session_state.current_step >= 3:
 
     with col3:
         st.subheader("Create New Chatbot")
-        new_bot_name = st.text_input("Chatbot Name")
-        new_bot_desc = st.text_area("Description")
-        create_bot = st.button("Create Chatbot", disabled=not new_bot_name)
+        new_bot_name = st.text_input("Chatbot Name", key="new_bot_input")
+        new_bot_desc = st.text_area("Description", key="new_bot_desc")
         
-        if create_bot:
+        # Auto-create chatbot when name is entered
+        if new_bot_name:
             try:
                 response = make_request_with_retry(
                     requests.post,
@@ -182,18 +203,39 @@ if st.session_state.current_step >= 3:
                         "description": new_bot_desc
                     }
                 )
-                st.session_state.chatbot_id = response.json()['id']
-                st.success(f"Chatbot created! ID: {st.session_state.chatbot_id}")
+                new_bot_id = response.json()['id']
+                st.session_state.existing_chatbots.append({
+                    "id": new_bot_id, 
+                    "name": new_bot_name,
+                    "description": new_bot_desc
+                })
+                st.session_state.chatbot_id = new_bot_id
+                st.success(f"Chatbot created! ID: {new_bot_id}")
                 if st.session_state.current_step == 3:
                     st.session_state.current_step = 4
+                # Clear the inputs
+                st.session_state.new_bot_input = ""
+                st.session_state.new_bot_desc = ""
+                st.rerun()
             except Exception as e:
                 st.error(f"Error creating chatbot: {str(e)}")
 
     with col4:
-        st.subheader("Existing Chatbot")
-        chatbot_id = st.text_input("Enter Chatbot ID", value=st.session_state.chatbot_id or "")
-        if chatbot_id and chatbot_id != st.session_state.chatbot_id:
-            st.session_state.chatbot_id = chatbot_id
+        st.subheader("Select Existing Chatbot")
+        # Create a list of chatbot options including names
+        bot_options = ["Select a chatbot..."] + [
+            f"{bot['name']} ({bot['id']})" 
+            for bot in st.session_state.existing_chatbots
+        ]
+        selected_bot = st.selectbox(
+            "Choose an existing chatbot",
+            options=bot_options,
+            key="bot_select"
+        )
+        
+        if selected_bot and selected_bot != "Select a chatbot...":
+            bot_id = selected_bot.split("(")[-1].rstrip(")")
+            st.session_state.chatbot_id = bot_id
             if st.session_state.current_step == 3:
                 st.session_state.current_step = 4
 
